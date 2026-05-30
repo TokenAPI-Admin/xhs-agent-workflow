@@ -201,6 +201,20 @@ button:disabled {
   font-weight: 800;
 }
 
+.download-cover {
+  display: inline-flex;
+  align-items: center;
+  height: 36px;
+  margin-top: 12px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: #ffffff;
+  background: var(--accent);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
 .note p,
 .note li,
 .card p,
