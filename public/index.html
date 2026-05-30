@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>小红书员工工作流</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="workspace">
+        <aside class="panel controls">
+          <div>
+            <p class="eyebrow">XHS Agent Workflow</p>
+            <h1>单封面涨粉笔记生产台</h1>
+          </div>
+
+          <label>
+            目标客户群
+            <input id="audience" value="20-35岁女生" />
+          </label>
+
+          <label>
+            新账号定位
+            <input id="positioning" value="普通人生也能精致生活" />
+          </label>
+
+          <label>
+            本条目标
+            <input id="goal" value="新账号第一条单封面涨粉笔记" />
+          </label>
+
+          <label>
+            选题方向
+            <textarea id="topic">用低成本生活秩序感，让普通日子看起来更精致</textarea>
+          </label>
+
+          <label>
+            语气
+            <input id="tone" value="真实、温柔、有一点行动力，不鸡汤，不炫富" />
+          </label>
+
+          <button id="run">调动员工生成</button>
+          <p class="hint">搜索 key 明天补也能跑冷启动版；模型连不上时自动用内置保底稿。</p>
+        </aside>
+
+        <section class="panel result">
+          <div class="status-row">
+            <div>
+              <p class="eyebrow">Result</p>
+              <h2 id="status">等待任务</h2>
+            </div>
+            <span id="mode" class="badge">idle</span>
+          </div>
+
+          <div id="output" class="output">
+            <div class="empty">输入任务后，我会调度 DeerFlow、agents、prompt-optimizer、image、Letta 产出一条可发布笔记。</div>
+          </div>
+        </section>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
