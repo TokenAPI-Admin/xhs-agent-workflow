@@ -245,7 +245,18 @@ func waitForSearchFeeds(page *rod.Page, maxWait time.Duration) (string, error) {
 		var result string
 		if err := rod.Try(func() {
 			result = page.Timeout(3 * time.Second).MustEval(`() => {
-				const looksLikeFeeds = (value) => Array.isArray(value) && value.some((item) => item && item.id && item.noteCard);
+				const normalizeFeed = (item) => {
+					if (!item || typeof item !== "object") return item;
+					const next = {...item};
+					if (!next.noteCard && next.note_card) next.noteCard = next.note_card;
+					if (!next.xsecToken && next.xsec_token) next.xsecToken = next.xsec_token;
+					if (!next.id && next.note_id) next.id = next.note_id;
+					return next;
+				};
+				const looksLikeFeeds = (value) => Array.isArray(value) && value.some((item) => {
+					if (!item || typeof item !== "object") return false;
+					return Boolean((item.id || item.note_id) && (item.noteCard || item.note_card));
+				});
 				const unwrap = (value) => {
 					if (!value || typeof value !== "object") return value;
 					if (Array.isArray(value)) return value;
@@ -267,7 +278,7 @@ func waitForSearchFeeds(page *rod.Page, maxWait time.Duration) (string, error) {
 				};
 				const state = window.__INITIAL_STATE__;
 				const feeds = findFeeds(state && state.search, 0, new Set()) || findFeeds(state, 0, new Set());
-				return feeds ? JSON.stringify(feeds) : "";
+				return feeds ? JSON.stringify(feeds.map(normalizeFeed)) : "";
 			}`).String()
 		}); err != nil {
 			lastErr = err
@@ -281,6 +292,20 @@ func waitForSearchFeeds(page *rod.Page, maxWait time.Duration) (string, error) {
 
 	if lastErr != nil {
 		return "", fmt.Errorf("search feeds not ready before timeout: %w", lastErr)
+	}
+	diag := ""
+	_ = rod.Try(func() {
+		diag = page.Timeout(3 * time.Second).MustEval(`() => JSON.stringify({
+			href: location.href,
+			title: document.title,
+			body: (document.body && document.body.innerText || "").slice(0, 600),
+			stateKeys: Object.keys(window.__INITIAL_STATE__ || {}),
+			searchKeys: Object.keys((window.__INITIAL_STATE__ || {}).search || {}),
+			feedKeys: Object.keys((window.__INITIAL_STATE__ || {}).feed || {})
+		})`).String()
+	})
+	if diag != "" {
+		return "", fmt.Errorf("%w; diagnostic=%s", errors.ErrNoFeeds, diag)
 	}
 	return "", errors.ErrNoFeeds
 }
