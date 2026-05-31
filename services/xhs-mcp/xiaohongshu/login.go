@@ -111,6 +111,12 @@ func (a *LoginAction) WaitForLogin(ctx context.Context) bool {
 
 func (a *LoginAction) hasLoggedInSignal(pp *rod.Page) (bool, string) {
 	if a.isLoginPage(pp) {
+		if ok, reason := a.hasLoggedInCookie(); ok {
+			logrus.Infof("xhs session cookie appeared on login page; refreshing to verify")
+			if a.refreshAndVerifyLoggedIn(pp) {
+				return true, reason + " verified after refresh"
+			}
+		}
 		return false, ""
 	}
 
@@ -132,6 +138,23 @@ func (a *LoginAction) hasLoggedInSignal(pp *rod.Page) (bool, string) {
 	}
 
 	return false, ""
+}
+
+func (a *LoginAction) refreshAndVerifyLoggedIn(pp *rod.Page) bool {
+	if err := rod.Try(func() {
+		pp.Timeout(15 * time.Second).MustNavigate("https://www.xiaohongshu.com/explore").MustWaitLoad()
+	}); err != nil {
+		logrus.Warnf("xhs login refresh failed: %v", err)
+		return false
+	}
+
+	time.Sleep(2 * time.Second)
+	if a.isLoginPage(pp) {
+		logrus.Infof("xhs login refresh still shows login page")
+		return false
+	}
+
+	return true
 }
 
 func (a *LoginAction) isLoginPage(pp *rod.Page) bool {
