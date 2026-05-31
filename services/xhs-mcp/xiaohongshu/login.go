@@ -110,9 +110,16 @@ func (a *LoginAction) WaitForLogin(ctx context.Context) bool {
 }
 
 func (a *LoginAction) hasLoggedInSignal(pp *rod.Page) (bool, string) {
+	if a.isLoginPage(pp) {
+		return false, ""
+	}
+
 	for _, selector := range []string{
 		".main-container .user .link-wrapper .channel",
 		".side-bar-component .user",
+		".user.side-bar-component",
+		".creator-entry",
+		"a[href*='/user/profile']",
 	} {
 		exists, _, err := pp.Has(selector)
 		if err == nil && exists {
@@ -121,10 +128,34 @@ func (a *LoginAction) hasLoggedInSignal(pp *rod.Page) (bool, string) {
 	}
 
 	if ok, reason := a.hasLoggedInCookie(); ok {
-		return true, reason
+		return true, reason + " with non-login page"
 	}
 
 	return false, ""
+}
+
+func (a *LoginAction) isLoginPage(pp *rod.Page) bool {
+	result := ""
+	err := rod.Try(func() {
+		result = pp.Timeout(3 * time.Second).MustEval(`() => {
+			const href = location.href || "";
+			const text = (document.body && document.body.innerText) || "";
+			if (href.includes("/login")) return "url";
+			if (text.includes("登录后推荐更懂你的笔记")) return "home-login";
+			if (text.includes("登录后查看搜索结果")) return "search-login";
+			if (text.includes("手机号登录") && text.includes("获取验证码") && text.includes("扫码")) return "login-form";
+			return "";
+		}`).String()
+	})
+	if err != nil {
+		logrus.Warnf("xhs login page check failed: %v", err)
+		return false
+	}
+	if result != "" {
+		logrus.Infof("xhs login page detected via %s", result)
+		return true
+	}
+	return false
 }
 
 func (a *LoginAction) hasLoggedInCookie() (bool, string) {

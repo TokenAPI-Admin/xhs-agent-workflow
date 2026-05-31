@@ -599,6 +599,9 @@ func saveCookies(page *rod.Page) error {
 	if !hasSession {
 		return fmt.Errorf("no web_session cookie found")
 	}
+	if pageLooksLoggedOut(page) {
+		return fmt.Errorf("current page is logged out")
+	}
 
 	data, err := json.Marshal(cks)
 	if err != nil {
@@ -619,6 +622,30 @@ func saveCookies(page *rod.Page) error {
 }
 
 // withBrowserPage 执行需要浏览器页面的操作的通用函数
+func pageLooksLoggedOut(page *rod.Page) bool {
+	result := ""
+	err := rod.Try(func() {
+		result = page.Timeout(3 * time.Second).MustEval(`() => {
+			const href = location.href || "";
+			const text = (document.body && document.body.innerText) || "";
+			if (href.includes("/login")) return "url";
+			if (text.includes("登录后推荐更懂你的笔记")) return "home-login";
+			if (text.includes("登录后查看搜索结果")) return "search-login";
+			if (text.includes("手机号登录") && text.includes("获取验证码") && text.includes("扫码")) return "login-form";
+			return "";
+		}`).String()
+	})
+	if err != nil {
+		logrus.Warnf("page logged-out check failed before saving cookies: %v", err)
+		return false
+	}
+	if result != "" {
+		logrus.Infof("skip cookie save because page looks logged out via %s", result)
+		return true
+	}
+	return false
+}
+
 func withBrowserPage(fn func(*rod.Page) error) error {
 	b := newBrowser()
 	defer b.Close()
