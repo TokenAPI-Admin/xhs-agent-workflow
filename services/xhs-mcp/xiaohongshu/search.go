@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-rod/rod"
+	"github.com/sirupsen/logrus"
 	"github.com/xpzouying/xiaohongshu-mcp/errors"
 )
 
@@ -166,13 +167,133 @@ func NewSearchAction(page *rod.Page) *SearchAction {
 }
 
 func (s *SearchAction) Search(ctx context.Context, keyword string, filters ...FilterOption) ([]Feed, error) {
-	page := s.page.Context(ctx)
+	page := s.page.Context(ctx).Timeout(45 * time.Second)
+
+	if err := rod.Try(func() {
+		page.MustNavigate(makeSearchURL(keyword)).MustWaitLoad()
+	}); err != nil {
+		return nil, fmt.Errorf("search page load failed: %w", err)
+	}
+
+	if len(filters) > 0 && hasNonEmptyFilter(filters) {
+		if err := s.applyFilters(page, filters...); err != nil {
+			logrus.Warnf("search filters skipped after timeout/error: %v", err)
+		}
+	}
+
+	result, err := waitForSearchFeeds(page, 30*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	var feeds []Feed
+	if err := json.Unmarshal([]byte(result), &feeds); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal feeds: %w", err)
+	}
+	if len(feeds) == 0 {
+		return nil, errors.ErrNoFeeds
+	}
+
+	return feeds, nil
+}
+
+func (s *SearchAction) applyFilters(page *rod.Page, filters ...FilterOption) error {
+	var allInternalFilters []internalFilterOption
+	for _, filter := range filters {
+		internalFilters, err := convertToInternalFilters(filter)
+		if err != nil {
+			return fmt.Errorf("filter conversion failed: %w", err)
+		}
+		allInternalFilters = append(allInternalFilters, internalFilters...)
+	}
+
+	for _, filter := range allInternalFilters {
+		if err := validateInternalFilterOption(filter); err != nil {
+			return fmt.Errorf("filter validation failed: %w", err)
+		}
+	}
+
+	return rod.Try(func() {
+		filterPage := page.Timeout(8 * time.Second)
+		filterButton := filterPage.MustElement(`div.filter`)
+		filterButton.MustHover()
+		filterPage.MustWait(`() => document.querySelector('div.filter-panel') !== null`)
+
+		for _, filter := range allInternalFilters {
+			selector := fmt.Sprintf(`div.filter-panel div.filters:nth-child(%d) div.tags:nth-child(%d)`,
+				filter.FiltersIndex, filter.TagsIndex)
+			filterPage.MustElement(selector).MustClick()
+		}
+		time.Sleep(1500 * time.Millisecond)
+	})
+}
+
+func hasNonEmptyFilter(filters []FilterOption) bool {
+	for _, filter := range filters {
+		if filter.SortBy != "" || filter.NoteType != "" || filter.PublishTime != "" || filter.SearchScope != "" || filter.Location != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func waitForSearchFeeds(page *rod.Page, maxWait time.Duration) (string, error) {
+	deadline := time.Now().Add(maxWait)
+	var lastErr error
+
+	for time.Now().Before(deadline) {
+		var result string
+		if err := rod.Try(func() {
+			result = page.Timeout(3 * time.Second).MustEval(`() => {
+				const looksLikeFeeds = (value) => Array.isArray(value) && value.some((item) => item && item.id && item.noteCard);
+				const unwrap = (value) => {
+					if (!value || typeof value !== "object") return value;
+					if (Array.isArray(value)) return value;
+					if (Array.isArray(value.value)) return value.value;
+					if (Array.isArray(value._value)) return value._value;
+					if (Array.isArray(value._rawValue)) return value._rawValue;
+					return value;
+				};
+				const findFeeds = (value, depth, seen) => {
+					value = unwrap(value);
+					if (looksLikeFeeds(value)) return value;
+					if (!value || typeof value !== "object" || depth > 8 || seen.has(value)) return null;
+					seen.add(value);
+					for (const key of Object.keys(value)) {
+						const found = findFeeds(value[key], depth + 1, seen);
+						if (found) return found;
+					}
+					return null;
+				};
+				const state = window.__INITIAL_STATE__;
+				const feeds = findFeeds(state && state.search, 0, new Set()) || findFeeds(state, 0, new Set());
+				return feeds ? JSON.stringify(feeds) : "";
+			}`).String()
+		}); err != nil {
+			lastErr = err
+		}
+
+		if result != "" && result != "[]" && result != "null" {
+			return result, nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	if lastErr != nil {
+		return "", fmt.Errorf("search feeds not ready before timeout: %w", lastErr)
+	}
+	return "", errors.ErrNoFeeds
+}
+
+func (s *SearchAction) searchLegacy(ctx context.Context, keyword string, filters ...FilterOption) ([]Feed, error) {
+	page := s.page.Context(ctx).Timeout(45 * time.Second)
 
 	searchURL := makeSearchURL(keyword)
-	page.MustNavigate(searchURL)
-	page.MustWaitStable()
-
-	page.MustWait(`() => window.__INITIAL_STATE__ !== undefined`)
+	if err := rod.Try(func() {
+		page.MustNavigate(searchURL).MustWaitLoad()
+	}); err != nil {
+		return nil, fmt.Errorf("search page load failed: %w", err)
+	}
 
 	// 如果有筛选条件，则应用筛选
 	if len(filters) > 0 {

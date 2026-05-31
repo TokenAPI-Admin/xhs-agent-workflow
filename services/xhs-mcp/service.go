@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/go-rod/rod"
@@ -108,12 +109,16 @@ func (s *XiaohongshuService) CheckLoginStatus(ctx context.Context) (*LoginStatus
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "check_login_status")
 
 	loginAction := xiaohongshu.NewLogin(page)
 
 	isLoggedIn, err := loginAction.CheckLoginStatus(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if isLoggedIn {
+		saveCookiesBestEffort(page, "check_login_status")
 	}
 
 	response := &LoginStatusResponse{
@@ -142,6 +147,9 @@ func (s *XiaohongshuService) GetLoginQrcode(ctx context.Context) (*LoginQrcodeRe
 	}
 	if err != nil {
 		return nil, err
+	}
+	if loggedIn {
+		saveCookiesBestEffort(page, "get_login_qrcode already logged in")
 	}
 
 	timeout := 4 * time.Minute
@@ -257,6 +265,7 @@ func (s *XiaohongshuService) publishContent(ctx context.Context, content xiaohon
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "publish_content")
 
 	action, err := xiaohongshu.NewPublishImageAction(page)
 	if err != nil {
@@ -340,6 +349,7 @@ func (s *XiaohongshuService) publishVideo(ctx context.Context, content xiaohongs
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "publish_video")
 
 	action, err := xiaohongshu.NewPublishVideoAction(page)
 	if err != nil {
@@ -356,6 +366,7 @@ func (s *XiaohongshuService) ListFeeds(ctx context.Context) (*FeedsListResponse,
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "list_feeds")
 
 	// 创建 Feeds 列表 action
 	action := xiaohongshu.NewFeedsListAction(page)
@@ -381,6 +392,7 @@ func (s *XiaohongshuService) SearchFeeds(ctx context.Context, keyword string, fi
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "search_feeds")
 
 	action := xiaohongshu.NewSearchAction(page)
 
@@ -409,6 +421,7 @@ func (s *XiaohongshuService) GetFeedDetailWithConfig(ctx context.Context, feedID
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "get_feed_detail")
 
 	// 创建 Feed 详情 action
 	action := xiaohongshu.NewFeedDetailAction(page)
@@ -434,6 +447,7 @@ func (s *XiaohongshuService) UserProfile(ctx context.Context, userID, xsecToken 
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "user_profile")
 
 	action := xiaohongshu.NewUserProfileAction(page)
 
@@ -458,6 +472,7 @@ func (s *XiaohongshuService) PostCommentToFeed(ctx context.Context, feedID, xsec
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "post_comment")
 
 	action := xiaohongshu.NewCommentFeedAction(page)
 
@@ -475,6 +490,7 @@ func (s *XiaohongshuService) LikeFeed(ctx context.Context, feedID, xsecToken str
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "like_feed")
 
 	action := xiaohongshu.NewLikeAction(page)
 	if err := action.Like(ctx, feedID, xsecToken); err != nil {
@@ -490,6 +506,7 @@ func (s *XiaohongshuService) UnlikeFeed(ctx context.Context, feedID, xsecToken s
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "unlike_feed")
 
 	action := xiaohongshu.NewLikeAction(page)
 	if err := action.Unlike(ctx, feedID, xsecToken); err != nil {
@@ -505,6 +522,7 @@ func (s *XiaohongshuService) FavoriteFeed(ctx context.Context, feedID, xsecToken
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "favorite_feed")
 
 	action := xiaohongshu.NewFavoriteAction(page)
 	if err := action.Favorite(ctx, feedID, xsecToken); err != nil {
@@ -520,6 +538,7 @@ func (s *XiaohongshuService) UnfavoriteFeed(ctx context.Context, feedID, xsecTok
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "unfavorite_feed")
 
 	action := xiaohongshu.NewFavoriteAction(page)
 	if err := action.Unfavorite(ctx, feedID, xsecToken); err != nil {
@@ -535,6 +554,7 @@ func (s *XiaohongshuService) ReplyCommentToFeed(ctx context.Context, feedID, xse
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "reply_comment")
 
 	action := xiaohongshu.NewCommentFeedAction(page)
 
@@ -555,10 +575,29 @@ func newBrowser() *headless_browser.Browser {
 	return browser.NewBrowser(configs.IsHeadless(), browser.WithBinPath(configs.GetBinPath()))
 }
 
+func saveCookiesBestEffort(page *rod.Page, reason string) {
+	if err := saveCookies(page); err != nil {
+		logrus.Warnf("skip saving cookies after %s: %v", reason, err)
+		return
+	}
+	logrus.Infof("cookies persisted after %s", reason)
+}
+
 func saveCookies(page *rod.Page) error {
 	cks, err := page.Browser().GetCookies()
 	if err != nil {
 		return err
+	}
+	hasSession := false
+	for _, ck := range cks {
+		name := strings.ToLower(ck.Name)
+		if ck.Value != "" && (name == "web_session" || strings.Contains(name, "web_session")) {
+			hasSession = true
+			break
+		}
+	}
+	if !hasSession {
+		return fmt.Errorf("no web_session cookie found")
 	}
 
 	data, err := json.Marshal(cks)
@@ -586,6 +625,7 @@ func withBrowserPage(fn func(*rod.Page) error) error {
 
 	page := b.NewPage()
 	defer page.Close()
+	defer saveCookiesBestEffort(page, "withBrowserPage")
 
 	return fn(page)
 }

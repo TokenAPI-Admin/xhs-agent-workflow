@@ -40,6 +40,9 @@ func (c *localCookie) LoadCookies() ([]byte, error) {
 
 // SaveCookies 保存 cookies 到文件中。
 func (c *localCookie) SaveCookies(data []byte) error {
+	if err := os.MkdirAll(filepath.Dir(c.path), 0755); err != nil {
+		return err
+	}
 	return os.WriteFile(c.path, data, 0644)
 }
 
